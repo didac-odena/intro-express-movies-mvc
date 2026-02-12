@@ -1,157 +1,171 @@
-# Movies API - Express.js
+# LAB | Express Movies — Mongoose y Seeds
 
-## 📋 Descripción del Proyecto
+## Introducción
 
-Este proyecto es una API RESTful para la gestión de películas construida con Express.js. El objetivo de este ejercicio es refactorizar la aplicación actual hacia una arquitectura **MVC (Modelo-Vista-Controlador)** para mejorar la organización, mantenibilidad y escalabilidad del código.
+Has heredado una API REST de películas construida con **Express 5**. La API tiene un CRUD funcional, pero utiliza un modelo falso que simula una base de datos con un JSON en memoria.
 
-## 🎯 Objetivo de la Refactorización
+Tu misión tiene dos partes:
 
-Actualmente, toda la lógica de la aplicación se encuentra en el archivo `app.js`. El objetivo es separar las responsabilidades en diferentes capas siguiendo el patrón arquitectónico MVC.
+1. **Migrar el modelo** para que use **Mongoose** y se conecte a una base de datos MongoDB real.
+2. **Crear un script de seeds** que limpie la base de datos y la llene con **100 películas aleatorias** usando **faker.js**.
 
-## 🏗️ Estructura del Proyecto
+## Requisitos
 
-Después de la refactorización, el proyecto debe tener la siguiente estructura:
+- [Node.js](https://nodejs.org/) v22 o superior.
+- [MongoDB](https://www.mongodb.com/) corriendo localmente o una URI de MongoDB Atlas.
+
+## Punto de partida
 
 ```
-intro-express-movies/
-├── app.js
-├── package.json
-├── data/
-│   └── movies.json
-├── models/
-│   └── movie.model.js
-├── controllers/
-│   └── movie.controller.js
-└── config/
-    └── routes.config.js
+app.js                          ← Servidor Express
+app.test.js                     ← Tests (tu guía para saber si vas bien)
+config/routes.config.js         ← Definición de rutas
+controllers/movie.controller.js ← Lógica de cada endpoint
+models/movie.model.js           ← ⚠️ Modelo falso (a migrar a Mongoose)
+data/movies.json                ← Datos estáticos originales
 ```
 
-## 📝 Instrucciones de Refactorización
+### Endpoints existentes
 
-### Paso 1: Crear la Estructura de Carpetas
+| Método   | Ruta          | Descripción                 |
+| -------- | ------------- | --------------------------- |
+| `GET`    | `/movies`     | Listar todas las películas  |
+| `GET`    | `/movies/:id` | Obtener una película por ID |
+| `POST`   | `/movies`     | Crear una nueva película    |
+| `PATCH`  | `/movies/:id` | Actualizar una película     |
+| `DELETE` | `/movies/:id` | Eliminar una película       |
 
-Crea las siguientes carpetas en la raíz del proyecto:
-
-```bash
-mkdir models controllers config
-```
-
-### Paso 2: Implementar el Modelo (Model)
-
-**Archivo:** `models/movie.model.js`
-
-- Mueve la lógica de acceso a datos desde `movies.js` a este archivo
-- El modelo debe exportar las siguientes funciones:
-  - `find()` - Obtener todas las películas
-  - `findById(id)` - Obtener una película por ID
-  - `create(data)` - Crear una nueva película
-  - `findByIdAndUpdate(id, data)` - Actualizar una película existente
-  - `delete(id)` - Eliminar una película
-
-**Responsabilidad:** Gestionar el acceso y manipulación de los datos de películas.
-
-### Paso 3: Implementar el Controlador (Controller)
-
-**Archivo:** `controllers/movie.controller.js`
-
-El controlador debe importar el modelo y exportar las siguientes funciones:
-
-- `list(req, res)` - Manejar GET /movies
-- `detail(req, res)` - Manejar GET /movies/:id
-- `create(req, res)` - Manejar POST /movies
-- `update(req, res)` - Manejar PATCH /movies/:id
-- `delete(req, res)` - Manejar DELETE /movies/:id
-
-**Responsabilidad:** Procesar las peticiones HTTP, coordinar con el modelo y enviar las respuestas.
-
-### Paso 4: Configurar las Rutas
-
-**Archivo:** `config/routes.config.js`
-
-- Crear un `express.Router()`
-- Definir todas las rutas del CRUD:
-  - GET `/movies` → `movieController.list`
-  - GET `/movies/:id` → `movieController.detail`
-  - POST `/movies` → `movieController.create`
-  - PATCH `/movies/:id` → `movieController.update`
-  - DELETE `/movies/:id` → `movieController.delete`
-- Exportar el router configurado
-
-**Responsabilidad:** Centralizar la definición de todas las rutas de la API.
-
-### Paso 5: Actualizar app.js
-
-El archivo `app.js` debe simplificarse para:
-
-1. Crear la aplicación Express
-2. Cargar los middlewares necesarios (express.json, morgan)
-3. Importar el router desde `config/routes.config.js`
-4. Montar el router en la aplicación
-5. Iniciar el servidor
-
-**Responsabilidad:** Punto de entrada de la aplicación y configuración general.
-
-## ✅ Criterios de Éxito
-
-- [ ] Estructura de carpetas creada correctamente
-- [ ] Código organizado según el patrón MVC
-- [ ] Separación clara de responsabilidades
-- [ ] Todos los tests pasan exitosamente (`npm test`)
-- [ ] La API funciona correctamente con la nueva estructura
-
-## 🚀 Instalación y Ejecución
-
-### Prerrequisitos
-
-- Node.js >= 18.x
-- npm o yarn
-
-### Instalación
+### Configuración inicial
 
 ```bash
 npm install
 ```
 
-### Modo Desarrollo
-
 ```bash
 npm run dev
 ```
-
-El servidor se iniciará con auto-reload en los cambios de archivos.
-
-### Ejecutar Tests
 
 ```bash
 npm test
 ```
 
-**Importante:** Después de la refactorización, todos los tests deben seguir pasando sin modificaciones.
+---
 
-## 🔌 Endpoints de la API
+## Iteración 1: Migrar el modelo a Mongoose
 
-| Método | Endpoint      | Descripción                       |
-| ------ | ------------- | --------------------------------- |
-| GET    | `/movies`     | Obtener todas las películas       |
-| GET    | `/movies/:id` | Obtener una película por ID       |
-| POST   | `/movies`     | Crear una nueva película          |
-| PATCH  | `/movies/:id` | Actualizar una película existente |
-| DELETE | `/movies/:id` | Eliminar una película             |
+El archivo `models/movie.model.js` actualmente simula una base de datos usando un array en memoria con `setTimeout` para emular latencia. Tu tarea es reemplazarlo por un **modelo de Mongoose real**.
 
-## 💡 Beneficios del Patrón MVC
+### 1.1 Instalar Mongoose
 
-- **Separación de responsabilidades:** Cada capa tiene un propósito específico
-- **Mantenibilidad:** Código más fácil de entender y modificar
-- **Escalabilidad:** Facilita añadir nuevas funcionalidades
-- **Reusabilidad:** Los modelos y controladores pueden reutilizarse
-- **Testabilidad:** Cada componente puede probarse de forma independiente
+```bash
+npm install mongoose
+```
 
-## 📚 Recursos Adicionales
+### 1.2 Conectar a MongoDB
 
-- [Express.js Documentation](https://expressjs.com/)
-- [RESTful API Design Best Practices](https://restfulapi.net/)
-- [MVC Pattern Explained](https://developer.mozilla.org/en-US/docs/Glossary/MVC)
+Abre `app.js` y añade la conexión a MongoDB **antes** de arrancar el servidor. Usa `mongoose.connect()` para conectar a una base de datos local llamada `movies-db`:
+
+```js
+import mongoose from "mongoose";
+
+mongoose
+  .connect("mongodb://localhost:27017/movies-db")
+  .then(() => console.log("Connected to MongoDB"))
+  .catch((err) => console.error("Error connecting to MongoDB:", err));
+```
+
+### 1.3 Crear el modelo de Mongoose
+
+Reemplaza el contenido de `models/movie.model.js` por un modelo de Mongoose. El schema debe reflejar la estructura de las películas en `data/movies.json`:
+
+| Campo      | Tipo       | Requerido |
+| ---------- | ---------- | :-------: |
+| `title`    | `String`   |    ✅     |
+| `year`     | `String`   |    ✅     |
+| `director` | `String`   |    ✅     |
+| `duration` | `String`   |    ❌     |
+| `genre`    | `[String]` |    ❌     |
+| `rate`     | `String`   |    ❌     |
+
+> 💡 **Pista:** Necesitas importar `Schema` y `model` de `mongoose`, definir un schema con `new Schema({...})` y exportar el modelo con `model("Movie", movieSchema)`.
+
+### 1.4 Adaptar el controlador
+
+Una vez migrado el modelo, revisa `controllers/movie.controller.js`. Los métodos del controlador ya usan `Movie.find()`, `Movie.findById()`, `Movie.create()` y `Movie.findByIdAndUpdate()`, que son métodos nativos de Mongoose, por lo que deberían funcionar directamente.
+
+Sin embargo, hay un problema: la función `deleteMovie` usa `Movie.delete()`, que **no es un método de Mongoose**. Cámbialo a `Movie.findByIdAndDelete(req.params.id)`.
 
 ---
 
-**¡Buena suerte con la refactorización! 🎬**
+## Iteración 2: Crear un script de seeds
+
+Ahora que la API usa MongoDB, necesitamos poblar la base de datos. Crea un script que genere **100 películas aleatorias** usando la librería `@faker-js/faker`.
+
+### 2.1 Instalar faker.js
+
+```bash
+npm install @faker-js/faker
+```
+
+### 2.2 Crear el archivo de seeds
+
+Crea un archivo `seeds/movies.seed.js` con la siguiente lógica:
+
+1. **Conectar** a MongoDB (misma URI que en `app.js`).
+2. **Limpiar** la colección de películas (`Movie.deleteMany({})`).
+3. **Generar** un array de 100 películas con datos aleatorios usando faker.
+4. **Insertar** las películas en la base de datos (`Movie.create(movies)` o `Movie.insertMany(movies)`).
+5. **Desconectar** de MongoDB y mostrar un mensaje de confirmación.
+
+Cada película generada debería tener campos realistas. Aquí tienes ideas para generarlos con faker:
+
+| Campo      | Ejemplo con faker                                                                                                                        |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `title`    | `faker.music.songName()` o `faker.word.words({ count: { min: 1, max: 4 } })`                                                             |
+| `year`     | `faker.date.past({ years: 50 }).getFullYear().toString()`                                                                                |
+| `director` | `faker.person.fullName()`                                                                                                                |
+| `duration` | `` `${faker.number.int({ min: 1, max: 3 })}h ${faker.number.int({ min: 0, max: 59 })}min` ``                                             |
+| `genre`    | `faker.helpers.arrayElements(["Action", "Comedy", "Drama", "Horror", "Sci-Fi", "Thriller", "Romance", "Animation"], { min: 1, max: 3 })` |
+| `rate`     | `faker.number.float({ min: 1, max: 10, fractionDigits: 1 }).toString()`                                                                  |
+
+### 2.3 Añadir el script a `package.json`
+
+Añade un script en `package.json` para poder ejecutar el seed fácilmente:
+
+```json
+"scripts": {
+  "seed": "node seeds/movies.seed.js"
+}
+```
+
+### 2.4 Ejecutar el seed
+
+```bash
+npm run seed
+```
+
+Deberías ver un mensaje como:
+
+```
+Connected to MongoDB
+Collection cleaned
+100 movies created
+MongoDB connection closed
+```
+
+Después de ejecutar el seed, arranca el servidor con `npm run dev` y comprueba que `GET /movies` devuelve las 100 películas generadas.
+
+---
+
+## Resultado esperado
+
+Cuando hayas terminado:
+
+- `npm run seed` → Limpia la base de datos e inserta 100 películas aleatorias.
+- `GET /movies` → 200 con array de 100 películas de la base de datos.
+- `GET /movies/:id` con ID válido → 200 con la película.
+- `POST /movies` con body válido → 201 con la película creada.
+- `PATCH /movies/:id` → 200 con la película actualizada.
+- `DELETE /movies/:id` → 204 sin contenido.
+
+Happy coding! 💙
