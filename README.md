@@ -1,27 +1,32 @@
-# LAB | Express Movies — Manejo de Errores
+# LAB | Express Movies — Relaciones con Mongoose
 
 ## Introducción
 
-Has heredado una API REST de películas construida con **Express 5**. La API funciona… pero tiene un problema importante: **no gestiona los errores de forma adecuada**. Si un usuario pide una película que no existe, la API responde con `null`. Si una ruta no existe, Express devuelve un HTML genérico. Y si ocurre cualquier error inesperado, la aplicación puede comportarse de forma impredecible.
+Tienes una API REST de películas construida con **Express 5** y **Mongoose**. La API ya tiene un CRUD completo de películas y un sistema de manejo de errores.
 
-Tu misión es **añadir un sistema robusto de manejo de errores** siguiendo las buenas prácticas de Express.
+Tu misión es **añadir un sistema de valoraciones (ratings)** que esté relacionado con las películas, aprendiendo a usar **referencias entre modelos**, **populate** y **virtual populate** de Mongoose.
 
 ## Requisitos
 
 - Tener [Node.js](https://nodejs.org/) instalado (v22 o superior).
+- Tener [MongoDB](https://www.mongodb.com/) corriendo en local.
 
 ## Punto de partida
 
 El proyecto ya tiene un CRUD funcional de películas con la siguiente estructura:
 
 ```
-app.js                          ← Servidor Express
-app.test.js                     ← Tests (tu guía para saber si vas bien)
-config/routes.config.js         ← Definición de rutas
-controllers/movie.controller.js ← Lógica de cada endpoint
-models/movie.model.js           ← Modelo de datos
-middlewares/                    ← 📂 Aquí crearás el middleware de errores
-docs/error-handling.md          ← 📖 Guía de referencia sobre manejo de errores
+app.js                              ← Servidor Express
+app.test.js                         ← Tests (tu guía para saber si vas bien)
+config/
+  db.config.js                      ← Conexión a MongoDB
+  routes.config.js                  ← Definición de rutas
+controllers/
+  movie.controller.js               ← Controlador de películas
+models/
+  movie.model.js                    ← Modelo de película
+middlewares/
+  error-handler.middleware.js        ← Middleware de errores
 ```
 
 ### Endpoints existentes
@@ -44,7 +49,7 @@ npm install
 
 ### Ejecutar los tests
 
-Los tests son tu guía principal. Al principio, varios tests fallarán porque el manejo de errores no está implementado. Tu objetivo es hacer que **todos los tests pasen**.
+Los tests son tu guía principal. Al principio, muchos tests fallarán porque las valoraciones no están implementadas. Tu objetivo es hacer que **todos los tests pasen**.
 
 ```bash
 npm test
@@ -56,130 +61,121 @@ Para lanzar el servidor en modo desarrollo:
 npm run dev
 ```
 
-> 📖 **Antes de empezar**, lee la guía [docs/error-handling.md](docs/error-handling.md). Ahí encontrarás toda la teoría y los ejemplos que necesitas para completar este lab.
+---
+
+### Iteración 1: Crear el modelo `Rating`
+
+Crea el archivo `models/rating.model.js` con el siguiente esquema:
+
+| Campo   | Tipo       | Validaciones                                      |
+| ------- | ---------- | ------------------------------------------------- |
+| `movie` | `ObjectId` | Obligatorio. Referencia al modelo `"Movie"`.      |
+| `text`  | `String`   | Obligatorio. Mínimo 10 caracteres. Con `trim`.    |
+| `score` | `Number`   | Obligatorio. Mínimo `1`, máximo `5`.              |
+
+**Puntos clave:**
+
+1. El campo `movie` debe usar `Schema.Types.ObjectId` con `ref: "Movie"` para establecer la **relación** con el modelo de película.
+2. Configura el esquema con `toJSON: { virtuals: true }` para que el campo `id` aparezca en las respuestas JSON.
+
+**Pista:**
+
+```js
+import { Schema, model } from "mongoose";
+
+const ratingSchema = new Schema(
+  {
+    movie: {
+      type: Schema.Types.ObjectId,
+      ref: "Movie",
+      required: true,
+    },
+    // ... define text y score con sus validaciones
+  },
+  {
+    toJSON: {
+      virtuals: true,
+    },
+  },
+);
+
+const Rating = model("Rating", ratingSchema);
+
+export default Rating;
+```
 
 ---
 
-### Iteración 1: Instalar `http-errors`
+### Iteración 2: Crear el controlador y las rutas de Rating
 
-La librería [`http-errors`](https://www.npmjs.com/package/http-errors) permite crear objetos de error con un código de estado HTTP asociado. Instálala como dependencia del proyecto:
+#### 2a. Controlador
 
-```bash
-npm install http-errors
-```
+Crea el archivo `controllers/rating.controller.js` con las siguientes funciones:
 
-Uso básico:
+- **`list(req, res)`** — Devuelve todas las valoraciones. Debe usar `.populate("movie")` para incluir los datos de la película relacionada (no solo su ID).
+- **`detail(req, res)`** — Devuelve una valoración por ID. Debe usar `.populate("movie")`. Si no existe, lanza un error 404.
+- **`create(req, res)`** — Crea una nueva valoración. Antes de crear, verifica que la película referenciada existe (busca por `req.body.movie`); si no existe, lanza un error 404 con el mensaje `"Movie not found"`. Devuelve 201.
+- **`update(req, res)`** — Actualiza una valoración por ID. Si no existe, lanza un error 404.
+- **`delete(req, res)`** — Elimina una valoración por ID. Si no existe, lanza un error 404. Devuelve 204.
 
-```js
-import createError from "http-errors";
-
-// Lanza un error 404 que será capturado por el middleware de errores
-throw createError(404, "Película no encontrada");
-```
-
----
-
-### Iteración 2: Gestionar el 404 en los controladores
-
-Abre `controllers/movie.controller.js` y modifica los endpoints que reciben `:id` para que devuelvan un **error 404** cuando la película no existe.
-
-Actualmente, si buscas una película con un ID que no existe, el controlador responde con `null` o no gestiona el caso. Debes:
-
-1. Importar `createError` de `http-errors`.
-2. En las funciones `detail`, `update` y `delete`, comprobar si la película devuelta es `null` o `undefined`.
-3. Si no existe, lanzar un error con `throw createError(404, "Movie not found")`.
-
-> 💡 **Recuerda:** Estamos usando **Express 5**, que captura automáticamente las excepciones en handlers `async`. No necesitas `try/catch` ni llamar a `next(error)` manualmente. Basta con hacer `throw`.
-
-**Pista — Ejemplo para `detail`:**
+**Pista — Ejemplo de `list` con populate:**
 
 ```js
-async function detail(req, res) {
-  const movie = await Movie.findById(req.params.id);
-
-  if (!movie) {
-    throw createError(404, "Movie not found");
-  }
-
-  res.json(movie);
+async function list(req, res) {
+  const ratings = await Rating.find().populate("movie");
+  res.json(ratings);
 }
 ```
 
-Aplica el mismo patrón en `update` y `delete`.
+> 💡 **¿Qué hace `.populate("movie")`?** Sustituye el ObjectId almacenado en el campo `movie` por el documento completo de la película. Sin populate, verías `"movie": "6789abc..."`. Con populate, verías `"movie": { "id": "6789abc...", "title": "Inception", ... }`.
+
+#### 2b. Rutas
+
+Abre `config/routes.config.js` y añade las rutas para el CRUD de valoraciones:
+
+| Método   | Ruta           | Controlador              |
+| -------- | -------------- | ------------------------ |
+| `GET`    | `/ratings`     | `ratingController.list`   |
+| `GET`    | `/ratings/:id` | `ratingController.detail` |
+| `POST`   | `/ratings`     | `ratingController.create` |
+| `PATCH`  | `/ratings/:id` | `ratingController.update` |
+| `DELETE` | `/ratings/:id` | `ratingController.delete` |
 
 ---
 
-### Iteración 3: Crear el middleware centralizado de manejo de errores
+### Iteración 3: Virtual Populate — Ratings desde la película
 
-Crea el archivo `middlewares/error-handler.middleware.js`. Este middleware será el encargado de interceptar **todos** los errores de la aplicación y devolver respuestas HTTP apropiadas.
+Hasta ahora, puedes obtener la película desde un rating (gracias a `populate`). Pero, ¿cómo obtienes todos los ratings de una película?
 
-Debe exportar una función `errorHandler` con **4 parámetros** `(err, req, res, next)` — así es como Express reconoce que es un middleware de errores.
+La relación está definida **solo** en el modelo `Rating` (el campo `movie`). El modelo `Movie` no tiene ningún campo que apunte a `Rating`. Aquí entra el **virtual populate**.
 
-El middleware debe gestionar los siguientes tipos de error, **en este orden**:
+#### 3a. Configurar el virtual en `Movie`
 
-#### 1. Error de validación de Mongoose (`ValidationError`)
-
-Cuando Mongoose detecta que faltan campos obligatorios o los datos no cumplen el esquema, lanza un error con `err.name === "ValidationError"`. Responde con **400 Bad Request** y devuelve directamente `err.errors` (el objeto con el detalle de cada campo que falló).
-
-#### 2. Error con status definido (`http-errors`)
-
-Los errores creados con `http-errors` (o similares) ya traen una propiedad `.status`. Responde con ese código de estado y un JSON con la clave `message`.
-
-#### 3. Error de cast de Mongoose (`CastError`)
-
-Cuando se recibe un ID con formato inválido (por ejemplo, un ObjectId mal formado), Mongoose lanza un error con `err.name === "CastError"`. Responde con **404 Not Found** y el mensaje `"Resource not found"`.
-
-#### 4. Error de clave duplicada en MongoDB (`E11000`)
-
-Cuando se intenta crear un recurso con un valor único que ya existe (por ejemplo, un ISBN duplicado), MongoDB lanza un error cuyo mensaje incluye `"E11000"`. Comprueba con `err.message?.includes("E11000")` y responde con **409 Conflict** y el mensaje `"Resource already exist"`.
-
-#### 5. Cualquier otro error
-
-Para cualquier error no contemplado, imprime el error en consola con `console.error(err)` y responde con **500 Internal Server Error** y el mensaje `"Internal server error"`.
-
-**Estructura esperada del middleware:**
+Abre `models/movie.model.js` y añade un **campo virtual** llamado `ratings`:
 
 ```js
-export function errorHandler(err, req, res, next) {
-  // 1. ValidationError → 400 con err.errors
-  // 2. err.status      → responder con ese status y su mensaje
-  // 3. CastError       → 404 "Resource not found"
-  // 4. E11000          → 409 "Resource already exist"
-  // 5. Cualquier otro  → 500 "Internal server error"
-}
+movieSchema.virtual("ratings", {
+  ref: "Rating",        // Modelo de donde vienen los datos
+  localField: "_id",    // Campo local (Movie._id)
+  foreignField: "movie", // Campo en Rating que apunta a Movie
+});
 ```
 
-> 💡 **Pista:** Usa `return` (o `return` implícito) después de cada `res.status().json()` para que no se ejecuten los bloques siguientes.
+> 💡 **¿Qué hace esto?** Crea un campo virtual `ratings` en el modelo `Movie`. No se guarda en la base de datos, pero cuando hagas `.populate("ratings")`, Mongoose buscará todos los documentos de `Rating` donde `movie === Movie._id` y los incluirá como un array.
 
-El formato de la respuesta JSON debe ser:
+#### 3b. Usar populate en el controlador de películas
 
-```json
-{
-  "message": "Mensaje del error"
-}
-```
-
-> La excepción es `ValidationError`, que devuelve `err.errors` directamente.
-
----
-
-### Iteración 4: Registrar el middleware en `app.js`
-
-Importa la función `errorHandler` desde `middlewares/error-handler.middleware.js` y regístrala en `app.js` **después** de las rutas:
+Modifica la función `detail` en `controllers/movie.controller.js` para que incluya las valoraciones de la película:
 
 ```js
-import { errorHandler } from "./middlewares/error-handler.middleware.js";
-
-// ... rutas ...
-
-app.use(errorHandler);
+const movie = await Movie.findById(req.params.id).populate("ratings");
 ```
 
-> ⚠️ **Importante:** El middleware de errores debe ir **después** de `app.use(router)`, es decir, al final de la cadena de middlewares.
+Ahora, al consultar `GET /movies/:id`, la respuesta incluirá un array `ratings` con todas las valoraciones de esa película.
 
 ---
 
-### Iteración 5: Ejecutar los tests
+### Iteración 4: Ejecutar los tests
 
 Ejecuta los tests para comprobar que todo funciona correctamente:
 
@@ -189,25 +185,11 @@ npm test
 
 Todos los tests deberían pasar. Si alguno falla, revisa:
 
-- ¿Estás lanzando `createError(404, ...)` cuando la película no existe?
-- ¿El middleware de errores está **después** de las rutas en `app.js`?
-- ¿El middleware de errores tiene exactamente **4 parámetros**?
-- ¿La respuesta JSON tiene la clave `message` con el mensaje?
-- ¿Estás comprobando los tipos de error en el orden correcto?
-
----
-
-### Bonus: Ruta no encontrada (catch-all 404)
-
-Añade un middleware **antes** del middleware de errores pero **después** de las rutas que capture cualquier petición a una ruta no definida y genere un error 404:
-
-```js
-app.use((req, res, next) => {
-  next(createError(404, "Route not found"));
-});
-```
-
-Esto hará que peticiones como `GET /peliculas` o `GET /foo` devuelvan un JSON con error 404 en lugar del HTML por defecto de Express.
+- ¿El modelo `Rating` tiene `ref: "Movie"` en el campo `movie`?
+- ¿Estás usando `.populate("movie")` en el controlador de ratings?
+- ¿Has configurado el `virtual` en el modelo `Movie` con los campos correctos (`localField`, `foreignField`)?
+- ¿Estás usando `.populate("ratings")` en el `detail` del controlador de películas?
+- ¿Has verificado que la película existe antes de crear un rating?
 
 ---
 
@@ -215,15 +197,53 @@ Esto hará que peticiones como `GET /peliculas` o `GET /foo` devuelvan un JSON c
 
 Cuando hayas terminado:
 
-- `GET /movies` → 200 con array de películas.
-- `GET /movies/1` → 200 con la película.
-- `GET /movies/999` → **404** con `{ "message": "Movie not found" }`.
-- `POST /movies` con body válido → 201 con la película creada.
-- `POST /movies` con datos inválidos → **400** con los errores de validación.
-- `POST /movies` con valor duplicado → **409** con `{ "message": "Resource already exist" }`.
-- `GET /movies/id-mal-formado` → **404** con `{ "message": "Resource not found" }`.
-- `PATCH /movies/999` → **404** con `{ "message": "Movie not found" }`.
-- `DELETE /movies/999` → **404** con `{ "message": "Movie not found" }`.
-- Cualquier error inesperado → **500** con `{ "message": "Internal server error" }`.
+**Ratings CRUD:**
+
+- `GET /ratings` → 200 con array de ratings, cada uno con la película populada.
+- `GET /ratings/:id` → 200 con el rating y la película populada.
+- `POST /ratings` con body válido → 201 con el rating creado.
+- `POST /ratings` con película inexistente → 404.
+- `POST /ratings` con datos inválidos (score fuera de rango, text corto) → 400.
+- `PATCH /ratings/:id` → 200 con el rating actualizado.
+- `DELETE /ratings/:id` → 204.
+
+**Populate en películas:**
+
+- `GET /movies/:id` → 200 con la película y un array `ratings` con todas sus valoraciones.
+
+**Ejemplo de respuesta `GET /movies/:id`:**
+
+```json
+{
+  "id": "abc123",
+  "title": "Inception",
+  "year": "2010",
+  "director": "Christopher Nolan",
+  "ratings": [
+    {
+      "id": "def456",
+      "movie": "abc123",
+      "text": "Una película extraordinaria con un concepto brillante",
+      "score": 5
+    }
+  ]
+}
+```
+
+**Ejemplo de respuesta `GET /ratings/:id`:**
+
+```json
+{
+  "id": "def456",
+  "text": "Una película extraordinaria con un concepto brillante",
+  "score": 5,
+  "movie": {
+    "id": "abc123",
+    "title": "Inception",
+    "year": "2010",
+    "director": "Christopher Nolan"
+  }
+}
+```
 
 Happy coding! 💙

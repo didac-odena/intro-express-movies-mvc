@@ -1,9 +1,35 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import request from "supertest";
+import mongoose from "mongoose";
 import app from "./app.js";
+import Movie from "./models/movie.model.js";
+
+let movie1, movie2;
+const fakeId = new mongoose.Types.ObjectId();
+
+beforeAll(async () => {
+  // Limpiar colecciones antes de empezar
+  const collections = mongoose.connection.collections;
+  for (const key in collections) {
+    await collections[key].deleteMany({});
+  }
+
+  [movie1, movie2] = await Movie.create([
+    { title: "The Shawshank Redemption", year: "1994", director: "Frank Darabont" },
+    { title: "The Godfather", year: "1972", director: "Francis Ford Coppola" },
+  ]);
+});
+
+afterAll(async () => {
+  const collections = mongoose.connection.collections;
+  for (const key in collections) {
+    await collections[key].deleteMany({});
+  }
+  await mongoose.disconnect();
+});
 
 // =============================================
-// CRUD Básico — estos tests pasan desde el inicio
+// CRUD Movies (ya implementado)
 // =============================================
 
 describe("GET /movies", () => {
@@ -27,11 +53,17 @@ describe("GET /movies", () => {
 
 describe("GET /movies/:id", () => {
   it("should return a single movie by id", async () => {
-    const res = await request(app).get("/movies/1");
+    const res = await request(app).get(`/movies/${movie1.id}`);
 
     expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty("id", "1");
+    expect(res.body).toHaveProperty("id", movie1.id);
     expect(res.body).toHaveProperty("title");
+  });
+
+  it("should return 404 for a non-existent movie", async () => {
+    const res = await request(app).get(`/movies/${fakeId}`);
+
+    expect(res.status).toBe(404);
   });
 });
 
@@ -53,113 +85,297 @@ describe("POST /movies", () => {
 
 describe("PATCH /movies/:id", () => {
   it("should update an existing movie", async () => {
-    const res = await request(app).patch("/movies/1").send({ rate: "9.9" });
+    const res = await request(app).patch(`/movies/${movie1.id}`).send({ rate: "9.9" });
 
     expect(res.status).toBe(200);
     expect(res.body.rate).toBe("9.9");
-    expect(res.body).toHaveProperty("id", "1");
+    expect(res.body).toHaveProperty("id", movie1.id);
+  });
+
+  it("should return 404 for a non-existent movie", async () => {
+    const res = await request(app).patch(`/movies/${fakeId}`).send({ rate: "5.0" });
+
+    expect(res.status).toBe(404);
   });
 });
 
 describe("DELETE /movies/:id", () => {
-  it("should delete a movie and return 204", async () => {
-    const res = await request(app).delete("/movies/2");
-
-    expect(res.status).toBe(204);
-    expect(res.body).toEqual({});
-  });
-
-  it("should no longer find the deleted movie", async () => {
-    await request(app).delete("/movies/3");
-    const res = await request(app).get("/movies/3");
+  it("should return 404 for a non-existent movie", async () => {
+    const res = await request(app).delete(`/movies/${fakeId}`);
 
     expect(res.status).toBe(404);
   });
 });
 
 // =============================================
-// Iteración 2: Gestionar 404 en controladores
+// Iteración 1: Modelo Rating
 // =============================================
 
-describe("Iteración 2: 404 para películas no encontradas", () => {
-  it("GET /movies/:id should return 404 for a non-existent movie", async () => {
-    const res = await request(app).get("/movies/999");
+describe("Iteración 1: Modelo Rating", () => {
+  it("POST /ratings should return 400 when text is missing", async () => {
+    const res = await request(app)
+      .post("/ratings")
+      .send({ movie: movie1.id, score: 3 });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
   });
 
-  it("PATCH /movies/:id should return 404 for a non-existent movie", async () => {
-    const res = await request(app).patch("/movies/999").send({ rate: "5.0" });
+  it("POST /ratings should return 400 when text is too short", async () => {
+    const res = await request(app)
+      .post("/ratings")
+      .send({ movie: movie1.id, text: "Short", score: 3 });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
   });
 
-  it("DELETE /movies/:id should return 404 for a non-existent movie", async () => {
-    const res = await request(app).delete("/movies/999");
+  it("POST /ratings should return 400 when score is missing", async () => {
+    const res = await request(app)
+      .post("/ratings")
+      .send({ movie: movie1.id, text: "This is a long enough review text" });
 
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /ratings should return 400 when score is less than 1", async () => {
+    const res = await request(app)
+      .post("/ratings")
+      .send({ movie: movie1.id, text: "This is a long enough review text", score: 0 });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /ratings should return 400 when score is greater than 5", async () => {
+    const res = await request(app)
+      .post("/ratings")
+      .send({ movie: movie1.id, text: "This is a long enough review text", score: 6 });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /ratings should return 400 when movie is missing", async () => {
+    const res = await request(app)
+      .post("/ratings")
+      .send({ text: "This is a long enough review text", score: 3 });
+
+    expect(res.status).toBe(400);
   });
 });
 
 // =============================================
-// Iteración 3: Middleware centralizado de errores
+// Iteración 2: CRUD de Ratings con populate
 // =============================================
 
-describe("Iteración 3: Middleware centralizado de errores", () => {
-  it("404 response should be JSON", async () => {
-    const res = await request(app).get("/movies/999");
+describe("Iteración 2: CRUD de Ratings", () => {
+  let rating1, rating2;
+
+  beforeAll(async () => {
+    // Crear ratings para los tests
+    const res1 = await request(app).post("/ratings").send({
+      movie: movie1.id,
+      text: "An absolute masterpiece of cinema",
+      score: 5,
+    });
+    rating1 = res1.body;
+
+    const res2 = await request(app).post("/ratings").send({
+      movie: movie1.id,
+      text: "Great movie but a bit too long",
+      score: 4,
+    });
+    rating2 = res2.body;
+  });
+
+  describe("POST /ratings", () => {
+    it("should create a rating and return 201", async () => {
+      const res = await request(app).post("/ratings").send({
+        movie: movie2.id,
+        text: "A classic that never gets old",
+        score: 5,
+      });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toHaveProperty("id");
+      expect(res.body.text).toBe("A classic that never gets old");
+      expect(res.body.score).toBe(5);
+    });
+
+    it("should return 404 when movie does not exist", async () => {
+      const res = await request(app).post("/ratings").send({
+        movie: fakeId.toString(),
+        text: "This review is for a movie that does not exist",
+        score: 3,
+      });
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("GET /ratings", () => {
+    it("should return an array of ratings", async () => {
+      const res = await request(app).get("/ratings");
+
+      expect(res.status).toBe(200);
+      expect(Array.isArray(res.body)).toBe(true);
+      expect(res.body.length).toBeGreaterThan(0);
+    });
+
+    it("each rating should have id, text, score and movie", async () => {
+      const res = await request(app).get("/ratings");
+
+      res.body.forEach((rating) => {
+        expect(rating).toHaveProperty("id");
+        expect(rating).toHaveProperty("text");
+        expect(rating).toHaveProperty("score");
+        expect(rating).toHaveProperty("movie");
+      });
+    });
+
+    it("should populate the movie field with the full movie object", async () => {
+      const res = await request(app).get("/ratings");
+
+      const rating = res.body.find((r) => r.id === rating1.id);
+      expect(rating.movie).toHaveProperty("title");
+      expect(rating.movie).toHaveProperty("id", movie1.id);
+    });
+  });
+
+  describe("GET /ratings/:id", () => {
+    it("should return a single rating by id", async () => {
+      const res = await request(app).get(`/ratings/${rating1.id}`);
+
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty("id", rating1.id);
+      expect(res.body.text).toBe("An absolute masterpiece of cinema");
+      expect(res.body.score).toBe(5);
+    });
+
+    it("should populate the movie field", async () => {
+      const res = await request(app).get(`/ratings/${rating1.id}`);
+
+      expect(res.body.movie).toHaveProperty("title");
+      expect(res.body.movie).toHaveProperty("id", movie1.id);
+    });
+
+    it("should return 404 for a non-existent rating", async () => {
+      const res = await request(app).get(`/ratings/${fakeId}`);
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("PATCH /ratings/:id", () => {
+    it("should update a rating", async () => {
+      const res = await request(app)
+        .patch(`/ratings/${rating1.id}`)
+        .send({ score: 4 });
+
+      expect(res.status).toBe(200);
+      expect(res.body.score).toBe(4);
+      expect(res.body).toHaveProperty("id", rating1.id);
+    });
+
+    it("should return 404 for a non-existent rating", async () => {
+      const res = await request(app)
+        .patch(`/ratings/${fakeId}`)
+        .send({ score: 3 });
+
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe("DELETE /ratings/:id", () => {
+    it("should delete a rating and return 204", async () => {
+      const res = await request(app).delete(`/ratings/${rating2.id}`);
+
+      expect(res.status).toBe(204);
+    });
+
+    it("should no longer find the deleted rating", async () => {
+      const res = await request(app).get(`/ratings/${rating2.id}`);
+
+      expect(res.status).toBe(404);
+    });
+
+    it("should return 404 for a non-existent rating", async () => {
+      const res = await request(app).delete(`/ratings/${fakeId}`);
+
+      expect(res.status).toBe(404);
+    });
+  });
+});
+
+// =============================================
+// Iteración 3: Virtual populate en películas
+// =============================================
+
+describe("Iteración 3: Virtual populate — ratings desde la película", () => {
+  beforeAll(async () => {
+    // Asegurar que hay al menos un rating para movie1
+    await request(app).post("/ratings").send({
+      movie: movie1.id,
+      text: "Rating created for virtual populate test",
+      score: 3,
+    });
+  });
+
+  it("GET /movies/:id should include a ratings array", async () => {
+    const res = await request(app).get(`/movies/${movie1.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("ratings");
+    expect(Array.isArray(res.body.ratings)).toBe(true);
+  });
+
+  it("ratings array should contain rating objects with text and score", async () => {
+    const res = await request(app).get(`/movies/${movie1.id}`);
+
+    expect(res.body.ratings.length).toBeGreaterThan(0);
+    res.body.ratings.forEach((rating) => {
+      expect(rating).toHaveProperty("text");
+      expect(rating).toHaveProperty("score");
+    });
+  });
+
+  it("ratings should belong to the requested movie", async () => {
+    const res = await request(app).get(`/movies/${movie1.id}`);
+
+    res.body.ratings.forEach((rating) => {
+      expect(rating.movie.toString()).toBe(movie1.id);
+    });
+  });
+
+  it("a movie with no ratings should have an empty ratings array", async () => {
+    // Crear una película nueva sin ratings
+    const movieRes = await request(app).post("/movies").send({
+      title: "New Movie Without Ratings",
+      year: "2025",
+      director: "Test Director",
+    });
+
+    const res = await request(app).get(`/movies/${movieRes.body.id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty("ratings");
+    expect(res.body.ratings).toEqual([]);
+  });
+});
+
+// =============================================
+// Errores — Middleware centralizado
+// =============================================
+
+describe("Middleware de errores", () => {
+  it("404 response should be JSON with error property", async () => {
+    const res = await request(app).get(`/movies/${fakeId}`);
 
     expect(res.status).toBe(404);
     expect(res.headers["content-type"]).toMatch(/json/);
-  });
-
-  it("404 response body should have an 'error' property with a message", async () => {
-    const res = await request(app).get("/movies/999");
-
-    expect(res.status).toBe(404);
-    expect(res.body).toHaveProperty("error");
-    expect(typeof res.body.error).toBe("string");
-    expect(res.body.error.length).toBeGreaterThan(0);
-  });
-
-  it("PATCH 404 response body should have an 'error' property", async () => {
-    const res = await request(app).patch("/movies/999").send({ rate: "5.0" });
-
-    expect(res.status).toBe(404);
     expect(res.body).toHaveProperty("error");
     expect(typeof res.body.error).toBe("string");
   });
 
-  it("DELETE 404 response body should have an 'error' property", async () => {
-    const res = await request(app).delete("/movies/999");
-
-    expect(res.status).toBe(404);
-    expect(res.body).toHaveProperty("error");
-    expect(typeof res.body.error).toBe("string");
-  });
-});
-
-// =============================================
-// Bonus: Catch-all 404 para rutas no definidas
-// =============================================
-
-describe("Bonus: Catch-all 404 para rutas no definidas", () => {
-  it("GET /unknown should return 404", async () => {
+  it("GET /unknown should return 404 with JSON error", async () => {
     const res = await request(app).get("/unknown");
-
-    expect(res.status).toBe(404);
-  });
-
-  it("GET /unknown should return JSON with 'error' property", async () => {
-    const res = await request(app).get("/unknown");
-
-    expect(res.headers["content-type"]).toMatch(/json/);
-    expect(res.body).toHaveProperty("error");
-    expect(typeof res.body.error).toBe("string");
-  });
-
-  it("POST /unknown should return 404 with JSON error", async () => {
-    const res = await request(app).post("/unknown").send({ foo: "bar" });
 
     expect(res.status).toBe(404);
     expect(res.headers["content-type"]).toMatch(/json/);
