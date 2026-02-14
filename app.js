@@ -1,5 +1,6 @@
 import express from "express";
 import morgan from "morgan";
+import "./config/db.config.js";
 import router from "./config/routes.config.js";
 
 const app = express();
